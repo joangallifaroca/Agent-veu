@@ -4,48 +4,36 @@ Sistema que converteix text a veu (català inclòs) i l'emet en directe a
 una sala de [LiveKit Cloud](https://cloud.livekit.io), on qualsevol
 "oient" connectat el sent en temps real. No hi ha vídeo.
 
-Hi ha dues maneres d'emetre:
-
-- **Des del navegador**, amb la pàgina `emissor.php`.
-- **Com a API**, cridant `api_emet.php` amb un JSON — sense navegador.
+Tot l'àudio es genera i es publica en un únic lloc: `emet.py`. No hi ha
+cap pas intermedi ni cap fitxer `.mp3` guardat al disc — l'emissor
+(navegador o qualsevol altre client) només crida l'API.
 
 ## Arquitectura
 
 ```
                  ┌──────────────┐
-  navegador ───► │ emissor.php  │──► genera_audio.php ──► tts.py (edge-tts)
-                 └──────────────┘        │
-                        │ publica l'àudio (WebRTC) i les dades (publishData)
-                        ▼
-                 ┌──────────────────────┐
-  app/servidor ─►│    api_emet.php      │──► emet.py (edge-tts + ffmpeg + LiveKit SDK)
-                 └──────────────────────┘        │
-                                                  │ publica l'àudio i les dades
-                                                  ▼
+  navegador ───► │ emissor.php  │──┐
+                 └──────────────┘  │  POST JSON { text, nom, camps }
+                                    ▼
+                           ┌──────────────┐
+  qualsevol client HTTP ─► │ api_emet.php │──► emet.py (edge-tts + ffmpeg + LiveKit SDK)
+                           └──────────────┘        │
+                                                    │ publica l'audio (WebRTC)
+                                                    │ i les dades (publishData)
+                                                    ▼
                                      ┌─────────────────────────┐
                                      │   Sala LiveKit Cloud     │
                                      └─────────────────────────┘
-                                                  │
-                                                  ▼
-                                          index.php (oient)
+                                                    │
+                                                    ▼
+                                            index.php (oient)
 ```
 
-### Camí 1: navegador (`emissor.php` → `index.php`)
+### Emetre
 
-1. L'usuari escriu un text i, opcionalment, parelles clau-valor a
-   `emissor.php`.
-2. El navegador demana el text sintetitzat a `genera_audio.php`, que
-   crida `tts.py` (Python + `edge-tts`) i genera un fitxer `.mp3` dins
-   de `audio/`.
-3. El navegador carrega aquest mp3 en un `<audio>` ocult i, amb
-   `captureStream()`, en treu una pista d'àudio que publica a la sala
-   amb `livekit-client`. Les parelles clau-valor es publiquen pel canal
-   de dades (`publishData`).
-4. `index.php` (l'oient) es connecta automàticament a la sala en
-   carregar la pàgina, reprodueix qualsevol pista d'àudio que arribi i
-   mostra el nom de qui l'ha enviat junt amb les dades rebudes.
-
-### Camí 2: API (`api_emet.php`), sense navegador
+`emissor.php` és només una interfície senzilla (nom, text, parelles
+clau-valor) que fa una crida HTTP — no es connecta mai a LiveKit ni fa
+servir `livekit-client`:
 
 ```
 POST /api_emet.php
@@ -71,26 +59,31 @@ Python** fa tota la feina sense cap fitxer intermedi:
 
 La crida HTTP respon quan l'àudio ja s'ha emès sencer (mode síncron).
 `emet.py` també es pot cridar directament des de la línia de comandes,
-sense passar per PHP:
+sense passar per PHP ni per cap client web:
 
 ```
 echo '{"text":"Hola","nom":"bot","camps":{"tiquet":"1"}}' | \
   python emet.py "wss://el-teu-projecte.livekit.cloud" "<API_KEY>" "<API_SECRET>" "agent-veu" "ca-ES-JoanaNeural"
 ```
 
+### Escoltar
+
+`index.php` (l'oient) es connecta automàticament a la sala en carregar
+la pàgina (token obtingut via `token.php`), reprodueix qualsevol pista
+d'àudio que arribi i mostra el nom de qui l'ha enviat junt amb les
+dades rebudes pel canal de dades.
+
 ## Fitxers
 
 | Fitxer | Funció |
 |---|---|
-| `emissor.php` | Pàgina web per emetre text manualment (navegador). |
+| `emissor.php` | Pàgina web senzilla per emetre text; crida `api_emet.php`. |
 | `index.php` | Pàgina web de l'oient: es connecta sol i reprodueix l'àudio i les dades. |
-| `api_emet.php` | API HTTP per emetre sense navegador. |
-| `token.php` | Genera tokens LiveKit per a `emissor.php`/`index.php`; els reutilitza via `$_SESSION` mentre siguin vàlids. |
-| `jwt.php` | Generació de tokens JWT HS256 per a LiveKit (usat per `token.php`). |
-| `genera_audio.php` / `tts_lib.php` | Sintetitzen text a `.mp3` cridant `tts.py` (usat pel camí del navegador). |
-| `tts.py` | Sintetitza un text a `.mp3` amb `edge-tts` (escriu a disc). |
-| `emet.py` | Sintetitza (en memòria), descodifica i publica l'àudio i les dades a LiveKit; autònom (genera el seu propi token). |
-| `config.php` | Carrega la configuració de `.env`. |
+| `api_emet.php` | API HTTP: valida la peticio i crida `emet.py`. |
+| `emet.py` | Unic lloc on es genera i es publica l'audio: sintetitza (edge-tts), descodifica (ffmpeg) i publica a LiveKit; autonom (genera el seu propi token). |
+| `token.php` | Genera tokens LiveKit nomes per a l'oient (`index.php`); els reutilitza via `$_SESSION` mentre siguin valids. |
+| `jwt.php` | Generacio de tokens JWT HS256 per a LiveKit (usat per `token.php`). |
+| `config.php` | Carrega la configuracio de `.env`. |
 
 ## Requisits
 
@@ -102,9 +95,6 @@ echo '{"text":"Hola","nom":"bot","camps":{"tiquet":"1"}}' | \
 - `ffmpeg` instal·lat i accessible al `PATH` (usat per `emet.py` per
   descodificar l'mp3 a PCM).
 - Un projecte creat a [cloud.livekit.io](https://cloud.livekit.io).
-- Navegador amb suport de `HTMLMediaElement.captureStream()` (Chrome/Edge
-  van bé; Firefox fa servir `mozCaptureStream()`, ja gestionat al codi)
-  — només necessari per a `emissor.php`, no per a l'API.
 
 ## Configuració
 
@@ -124,11 +114,11 @@ Copia `.env.example` a `.env` i omple:
 php -S localhost:8000
 ```
 
-- Obre `http://localhost:8000/emissor.php`, prem "Connecta a la sala",
-  afegeix parelles clau-valor si cal i prem "Emet aquest text".
+- Obre `http://localhost:8000/emissor.php`, afegeix parelles clau-valor
+  si cal i prem "Emet aquest text".
 - Obre `http://localhost:8000/index.php` en una altra pestanya/dispositiu
   — es connecta sol i mostra l'àudio i les dades rebudes.
-- Per emetre via API:
+- Per emetre via API des de qualsevol altre client:
   ```
   curl -X POST http://localhost:8000/api_emet.php \
     -H "Content-Type: application/json" \
@@ -137,10 +127,8 @@ php -S localhost:8000
 
 ## Notes
 
-- Aquest projecte és un demo senzill: `token.php` i `api_emet.php` no
-  demanen cap contrasenya per emetre. Si l'exposes fora de la teva
-  xarxa local, afegeix algun control d'accés abans.
-- Els fitxers generats a `audio/` (camí del navegador) no s'esborren
-  automàticament; en un entorn de producció caldria netejar-los
-  periòdicament.
-- `api_emet.php` no genera cap fitxer a `audio/`: tot passa en memòria.
+- Aquest projecte és un demo senzill: `api_emet.php` i `token.php` no
+  demanen cap contrasenya. Si l'exposes fora de la teva xarxa local,
+  afegeix algun control d'accés abans.
+- No es genera ni es desa cap fitxer d'àudio al disc: tot passa en
+  memòria dins `emet.py`.

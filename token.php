@@ -1,8 +1,8 @@
 <?php
-// Genera un token d'acces (JWT HS256) per a LiveKit Cloud, i el reutilitza
-// (via sessio) mentre segueixi sent valid, en lloc de crear-ne un nou a
-// cada peticio.
-// POST/GET: rol=emissor|oient, nom
+// Genera un token d'acces (JWT HS256) per a LiveKit Cloud per a l'oient
+// (nomes subscriu, no publica), i el reutilitza (via sessio) mentre
+// segueixi sent valid, en lloc de crear-ne un nou a cada peticio.
+// POST/GET: nom
 
 require_once __DIR__ . '/jwt.php';
 
@@ -20,25 +20,20 @@ if (LIVEKIT_URL === '' || LIVEKIT_API_KEY === '' || LIVEKIT_API_SECRET === '') {
     error('Falta configurar el fitxer .env', 500);
 }
 
-$rol = $_REQUEST['rol'] ?? 'oient';
 $nom = trim($_REQUEST['nom'] ?? '');
 $nom = mb_substr(preg_replace('/[^\p{L}\p{N} ._-]/u', '', $nom), 0, 40);
-$esEmissor = ($rol === 'emissor');
 
 $marge = 60; // segons de marge abans de caducar per no donar un token al limit
-$clauSessio = 'livekit_' . $rol;
-$desat = $_SESSION[$clauSessio] ?? null;
+$desat = $_SESSION['livekit_oient'] ?? null;
 
 if ($desat && $desat['nom'] === $nom && $desat['exp'] > time() + $marge) {
     $token = $desat['token'];
-    $identity = $desat['identity'];
 } else {
-    $identity = ($esEmissor ? 'agent-' : 'oient-') . bin2hex(random_bytes(4)) . ($nom !== '' ? '-' . $nom : '');
-    $resultat = creaTokenLiveKit($identity, $nom, $esEmissor, $esEmissor, true);
+    $identity = 'oient-' . bin2hex(random_bytes(4)) . ($nom !== '' ? '-' . $nom : '');
+    $resultat = creaTokenLiveKit($identity, $nom, false, false, true);
     $token = $resultat['token'];
-    $_SESSION[$clauSessio] = [
+    $_SESSION['livekit_oient'] = [
         'token' => $token,
-        'identity' => $identity,
         'nom' => $nom,
         'exp' => $resultat['exp'],
     ];

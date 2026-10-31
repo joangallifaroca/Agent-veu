@@ -25,16 +25,11 @@
 </div>
 <textarea id="text" placeholder="Escriu el text que vols que es senti..."></textarea>
 <div>
-  <button id="connecta">Connecta a la sala</button>
-  <button id="emet" disabled>Emet aquest text</button>
+  <button id="emet">Emet aquest text</button>
 </div>
-<div id="estat">Desconnectat</div>
-<audio id="player" style="display:none"></audio>
+<div id="estat">Preparat</div>
 
-<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.7/dist/livekit-client.umd.js"></script>
 <script>
-let room = null;
-let trackPublicat = null;
 const $ = id => document.getElementById(id);
 const estat = t => $('estat').textContent = t;
 
@@ -64,67 +59,26 @@ function recullParells() {
 $('afegeix-parell').onclick = () => afegeixParell();
 afegeixParell();
 
-$('connecta').onclick = async () => {
-  const fd = new FormData();
-  fd.append('rol', 'emissor');
-  fd.append('nom', $('nom').value);
-  const r = await (await fetch('token.php', { method: 'POST', body: fd })).json();
-  if (!r.success) { estat(r.message); return; }
-
-  room = new LivekitClient.Room();
-  room.on(LivekitClient.RoomEvent.Disconnected, () => estat('Desconnectat'));
-
-  await room.connect(r.url, r.token);
-
-  estat('Connectat a la sala "' + r.room + '"');
-  $('connecta').disabled = true;
-  $('emet').disabled = false;
-};
-
 $('emet').onclick = async () => {
   const text = $('text').value.trim();
-  if (!text || !room) return;
+  if (!text) return;
 
   $('emet').disabled = true;
-  estat('Generant audio...');
+  estat('Emetent...');
 
-  const fd = new FormData();
-  fd.append('text', text);
-  const r = await (await fetch('genera_audio.php', { method: 'POST', body: fd })).json();
-  if (!r.success) { estat(r.message); $('emet').disabled = false; return; }
+  try {
+    const r = await (await fetch('api_emet.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, nom: $('nom').value.trim(), camps: recullParells() }),
+    })).json();
 
-  const player = $('player');
-  player.srcObject = null;
-  player.src = r.url + '?t=' + Date.now();
+    estat(r.success ? 'Emes correctament.' : r.message);
+  } catch (e) {
+    estat('Error de connexio: ' + e.message);
+  }
 
-  player.oncanplaythrough = async () => {
-    player.oncanplaythrough = null;
-
-    const stream = player.captureStream ? player.captureStream() : player.mozCaptureStream();
-    const [pistaAudio] = stream.getAudioTracks();
-
-    if (trackPublicat) {
-      await room.localParticipant.unpublishTrack(trackPublicat);
-      trackPublicat.stop();
-    }
-
-    trackPublicat = new LivekitClient.LocalAudioTrack(pistaAudio);
-    await room.localParticipant.publishTrack(trackPublicat);
-
-    const dades = { text, camps: recullParells() };
-    await room.localParticipant.publishData(
-      new TextEncoder().encode(JSON.stringify(dades)),
-      { reliable: true }
-    );
-
-    await player.play();
-    estat('Emetent: "' + text + '"');
-  };
-
-  player.onended = () => {
-    estat('Connectat a la sala "' + room.name + '". Preparat per al seguent text.');
-    $('emet').disabled = false;
-  };
+  $('emet').disabled = false;
 };
 </script>
 </body>
