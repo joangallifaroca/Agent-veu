@@ -1,0 +1,4 @@
+# Bloqueja l'acces al fitxer amb els secrets
+<FilesMatch "^\.env">
+    Require all denied
+</FilesMatch>
